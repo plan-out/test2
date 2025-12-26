@@ -34,26 +34,35 @@
         });
 
         // 3. 도로공사 실시간 데이터 호출 함수
-        async function fetchTrafficData() {
-            // CORS 우회를 위한 공용 프록시 (실제 서비스시는 개인 서버 권장)
-            const proxy = "https://cors-anywhere.herokuapp.com/";
-            const targetUrl = `http://data.ex.co.kr/openapi/od_data/view?key=${EX_KEY}&type=json&listType=key`;
+       async function fetchTrafficData() {
+    // 1. CORS 우회용 프록시 (https 필수)
+    // lms-cors-proxy 같은 다른 공개 프록시를 사용하거나, 
+    // 본인의 키를 숨기려면 전용 프록시 서버가 필요합니다.
+    const proxy = "https://cors-anywhere.herokuapp.com/"; 
+    
+    // 2. 도로공사 API 주소 (https로 시도)
+    const targetUrl = `https://data.ex.co.kr/openapi/od_data/view?key=${EX_KEY}&type=json&listType=key`;
 
-            try {
-                const response = await fetch(proxy + targetUrl);
-                const data = await response.json();
-                
-                // 도로공사 '실시간 전국 교통량' 데이터는 보통 'list' 배열에 담겨 옵니다.
-                // 주의: 해당 API는 위치(좌표)를 주지 않으므로, 주요 거점 좌표와 매칭이 필요합니다.
-                if (data.list) {
-                    processData(data.list);
-                }
-            } catch (error) {
-                console.error("API 호출 에러:", error);
-                document.getElementById('loading').innerText = "데이터 호출 실패 (CORS 또는 키 확인)";
+    try {
+        const response = await fetch(proxy + targetUrl, {
+            headers: {
+                'X-Requested-With': 'XMLHttpRequest'
             }
+        });
+
+        if (response.status === 403) {
+            document.getElementById('loading').innerText = "프록시 권한이 필요합니다. [cors-anywhere.herokuapp.com/corsdemo]에 접속해 버튼을 눌러주세요.";
+            return;
         }
 
+        const data = await response.json();
+        if (data.list) {
+            processData(data.list);
+        }
+    } catch (error) {
+        console.error("API 호출 에러:", error);
+    }
+}
         // 4. 데이터 가공 (영업소/지점별 좌표 매칭)
         function processData(apiList) {
             // 실제 서비스에서는 모든 VDS 좌표 DB가 필요하지만, 
@@ -106,3 +115,4 @@
     </script>
 </body>
 </html>
+
