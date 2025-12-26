@@ -1,100 +1,114 @@
 <!DOCTYPE html>
-<html>
+<html lang="ko">
 <head>
     <meta charset="utf-8">
     <title>실시간 고속도로 통행량 히트맵</title>
     <style>
-        #map { width: 100%; height: 800px; background-color: #f0f0f0; }
-        .loading { position: fixed; top: 10px; left: 10px; z-index: 10; background: white; padding: 10px; border-radius: 5px; box-shadow: 0 2px 5px rgba(0,0,0,0.2); }
+        body, html { margin: 0; padding: 0; width: 100%; height: 100%; font-family: sans-serif; }
+        #map { width: 100%; height: 100vh; position: relative; }
+        .ui-panel {
+            position: absolute; top: 20px; left: 20px; z-index: 100;
+            background: white; padding: 15px; border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+        }
+        #loading-status { color: #e67e22; font-weight: bold; }
+        .legend { margin-top: 10px; font-size: 12px; }
+        .legend span { display: inline-block; width: 30px; height: 10px; margin-right: 5px; }
     </style>
 </head>
 <body>
-    <div id="loading" class="loading">데이터 로딩 중...</div>
+
+    <div class="ui-panel">
+        <h3 style="margin:0 0 10px 0;">전국 고속도로 통행량</h3>
+        <div id="loading-status">데이터 로딩 중...</div>
+        <div class="legend">
+            <div><span style="background:red"></span> 혼잡 (5000대↑)</div>
+            <div><span style="background:yellow"></span> 보통</div>
+            <div><span style="background:blue"></span> 원활</div>
+        </div>
+    </div>
+
     <div id="map"></div>
 
     <script type="text/javascript" src="//dapi.kakao.com/v2/maps/sdk.js?appkey=a3a42c7f67bafba966c8452bc00755cf"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/heatmap.js/2.0.2/heatmap.min.js"></script>
 
     <script>
-        const EX_KEY = '2407937665'; // 도로공사 API 키
-        let trafficPoints = []; // API에서 받아온 데이터를 저장할 배열
+        // 설정값
+        const EX_KEY = '2407937665'; // 한국도로공사 인증키 (Decoding 키 추천)
+        let trafficPoints = [];
 
-        // 1. 지도 초기화
+        // 지도 초기화
         const mapContainer = document.getElementById('map');
-        const mapOption = { center: new kakao.maps.LatLng(36.5, 127.5), level: 11 };
+        const mapOption = { 
+            center: new kakao.maps.LatLng(36.5, 127.5), 
+            level: 11 
+        };
         const map = new kakao.maps.Map(mapContainer, mapOption);
 
-        // 2. 히트맵 인스턴스 초기화
+        // 히트맵 설정
         const heatmap = h337.create({
             container: mapContainer,
-            radius: 35,
+            radius: 40,
             maxOpacity: .6,
             blur: .85,
-            gradient: { '.2': 'blue', '.5': 'lime', '.8': 'orange', '.95': 'red' }
+            gradient: { '.2': 'blue', '.5': 'lime', '.8': 'yellow', '.95': 'red' }
         });
 
-        // 3. 도로공사 실시간 데이터 호출 함수
-       async function fetchTrafficData() {
-    // 1. CORS 우회용 프록시 (https 필수)
-    // lms-cors-proxy 같은 다른 공개 프록시를 사용하거나, 
-    // 본인의 키를 숨기려면 전용 프록시 서버가 필요합니다.
-    const proxy = "https://cors-anywhere.herokuapp.com/"; 
-    
-    // 2. 도로공사 API 주소 (https로 시도)
-    const targetUrl = `https://data.ex.co.kr/openapi/od_data/view?key=${EX_KEY}&type=json&listType=key`;
+        // 주요 영업소 좌표 데이터 (API 데이터와 매칭용)
+        const cityCoords = {
+            "서울": {lat: 37.362, lng: 127.108}, "수원": {lat: 37.263, lng: 127.028},
+            "대전": {lat: 36.350, lng: 127.384}, "대구": {lat: 35.871, lng: 128.601},
+            "부산": {lat: 35.179, lng: 129.075}, "광주": {lat: 35.160, lng: 126.851},
+            "강릉": {lat: 37.751, lng: 128.876}, "인천": {lat: 37.456, lng: 126.705},
+            "울산": {lat: 35.539, lng: 129.311}, "춘천": {lat: 37.885, lng: 127.730}
+        };
 
-    try {
-        const response = await fetch(proxy + targetUrl, {
-            headers: {
-                'X-Requested-With': 'XMLHttpRequest'
+        // 데이터 호출 함수 (AllOrigins 프록시 사용)
+        async function getTrafficData() {
+            const statusTag = document.getElementById('loading-status');
+            const targetUrl = `http://data.ex.co.kr/openapi/od_data/view?key=${EX_KEY}&type=json&listType=key`;
+            
+            // AllOrigins 프록시를 통해 HTTPS 보안 이슈 및 CORS 해결
+            const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(targetUrl)}`;
+
+            try {
+                const response = await fetch(proxyUrl);
+                if (!response.ok) throw new Error('네트워크 응답 에러');
+                
+                const result = await response.json();
+                const data = JSON.parse(result.contents); // AllOrigins는 결과를 문자열로 담아줌
+
+                if (data.list && data.list.length > 0) {
+                    processTraffic(data.list);
+                    statusTag.innerText = "실시간 데이터 업데이트 완료";
+                    statusTag.style.color = "#27ae60";
+                } else {
+                    statusTag.innerText = "데이터가 비어있습니다 (키 확인 필요)";
+                }
+            } catch (error) {
+                console.error('에러 상세:', error);
+                statusTag.innerText = "호출 실패 (API 키 또는 서버 점검)";
+                statusTag.style.color = "#c0392b";
             }
-        });
-
-        if (response.status === 403) {
-            document.getElementById('loading').innerText = "프록시 권한이 필요합니다. [cors-anywhere.herokuapp.com/corsdemo]에 접속해 버튼을 눌러주세요.";
-            return;
         }
 
-        const data = await response.json();
-        if (data.list) {
-            processData(data.list);
-        }
-    } catch (error) {
-        console.error("API 호출 에러:", error);
-    }
-}
-        // 4. 데이터 가공 (영업소/지점별 좌표 매칭)
-        function processData(apiList) {
-            // 실제 서비스에서는 모든 VDS 좌표 DB가 필요하지만, 
-            // 여기서는 시연을 위해 주요 영업소 좌표와 API의 데이터를 매칭하는 예시입니다.
-            const cityCoords = {
-                "서울": {lat: 37.362, lng: 127.108},
-                "수원": {lat: 37.263, lng: 127.028},
-                "대전": {lat: 36.350, lng: 127.384},
-                "대구": {lat: 35.871, lng: 128.601},
-                "부산": {lat: 35.179, lng: 129.075},
-                "광주": {lat: 35.160, lng: 126.851},
-                "강릉": {lat: 37.751, lng: 128.876}
-            };
-
+        function processTraffic(apiList) {
             trafficPoints = apiList.map(item => {
-                // API의 'unitName'(영업소명)과 위 좌표 객체를 매칭
-                const coord = cityCoords[item.unitName]; 
+                const coord = cityCoords[item.unitName];
                 if (coord) {
                     return {
                         lat: coord.lat,
                         lng: coord.lng,
-                        count: parseInt(item.trafficAmout) || 100 // 교통량 수치
+                        count: parseInt(item.trafficAmout) || 0
                     };
                 }
                 return null;
             }).filter(p => p !== null);
 
             updateHeatmap();
-            document.getElementById('loading').style.display = 'none';
         }
 
-        // 5. 히트맵 갱신 함수
         function updateHeatmap() {
             const points = [];
             const projection = map.getProjection();
@@ -104,15 +118,15 @@
                 points.push({ x: pixel.x, y: pixel.y, value: p.count });
             });
 
-            // max값은 데이터 중 가장 높은 교통량 수치에 맞춰 조절하면 가독성이 좋아집니다.
+            // max값을 5000 정도로 설정하면 색상 변화가 뚜렷합니다.
             heatmap.setData({ max: 5000, data: points });
         }
 
-        // 지도 이동/확대 시 히트맵 위치 재계산
+        // 지도 이벤트: 움직임이 멈췄을 때 히트맵 재계산
         kakao.maps.event.addListener(map, 'idle', updateHeatmap);
 
-        fetchTrafficData();
+        // 실행
+        getTrafficData();
     </script>
 </body>
 </html>
-
